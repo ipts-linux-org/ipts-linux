@@ -1,0 +1,26 @@
+origin/drm-intel-fixes 168309855a7d1e16db751e9c647119fe2d2dc878
+	Linux 4.4-rc8
+drm-upstream/drm-fixes 3bea6a4c7895fc94965a219a8da9bcf753667901
+	Merge branch 'linux-4.4' of git://github.com/skeggsb/linux into drm-fixes
+origin/drm-intel-next-fixes d5f384de5bf16aa79095a1af5da65b9ffc3fe71d
+	drm/i915: Move Braswell stop_machine GGTT insertion workaround
+origin/drm-intel-next-queued cd7feaaad68edd12959843ccee9ecfcf05ecdbfe
+	drm/i915: Don't warn if the workaround list is empty part 2.
+drm-upstream/drm-next c11b8989635166c5a1e6aac1853a847bd664f8db
+	Merge tag 'omapdrm-4.5-resolved' of git://git.kernel.org/pub/scm/linux/kernel/git/tomba/linux into drm-next
+sound-upstream/for-next 9d9938854efcf2f21381b930bc1324e95640e0c4
+	Merge branch 'for-linus' into for-next
+sound-upstream/for-linus 3f37b26f8d57756b591383a9d8ce1cd628bc773c
+	Merge tag 'asoc-fix-v4.4-rc8' of git://git.kernel.org/pub/scm/linux/kernel/git/broonie/sound into for-linus
+origin/topic/drm-fixes 5481c8fb1da2a573861095fbea078f30c664d0bd
+	drm/atomic-helper: Check encoder/crtc constraints
+origin/topic/drm-misc d9d8c4cf23e8badfa8d49fe66c6a49970f896689
+	drm: move MODULE_PARM_DESC to other file
+origin/topic/kerneldoc 8ba718e60a1091dec68a0b3e513393b48b894654
+	drm: Enable markdown^Wasciidoc for gpu.tmpl
+origin/topic/crc-pmic 04cbfe68c3190f23bcfec230bfd832b533f35554
+	mfd: Add GPIOLIB dependency if INTEL_SOC_PMIC is to be enabled
+origin/topic/connector-locking 3fdefa399e4644399ce3e74e65a75122d52dba6a
+	drm: gc now dead mode_group code
+origin/topic/core-for-CI 527e9316f8ec44bd53d90fb9f611fa7ffff52bb9
+	Linux 4.4-rc4
