@@ -2188,10 +2188,6 @@ static irqreturn_t ironlake_irq_handler(int irq, void *arg)
 	/* IRQs are synced during runtime_suspend, we don't require a wakeref */
 	disable_rpm_wakeref_asserts(dev_priv);
 
-	/* We get interrupts on unclaimed registers, so check for this before we
-	 * do any I915_{READ,WRITE}. */
-	intel_uncore_check_errors(dev);
-
 	/* disable master interrupt before clearing iir  */
 	de_ier = I915_READ(DEIER);
 	I915_WRITE(DEIER, de_ier & ~DE_MASTER_IRQ_CONTROL);
@@ -2414,9 +2410,13 @@ static irqreturn_t gen8_irq_handler(int irq, void *arg)
 				spt_irq_handler(dev, pch_iir);
 			else
 				cpt_irq_handler(dev, pch_iir);
-		} else
-			DRM_ERROR("The master control interrupt lied (SDE)!\n");
-
+		} else {
+			/*
+			 * Like on previous PCH there seems to be something
+			 * fishy going on with forwarding PCH interrupts.
+			 */
+			DRM_DEBUG_DRIVER("The master control interrupt lied (SDE)!\n");
+		}
 	}
 
 	I915_WRITE_FW(GEN8_MASTER_IRQ, GEN8_MASTER_IRQ_CONTROL);
@@ -2945,14 +2945,44 @@ static void semaphore_clear_deadlocks(struct drm_i915_private *dev_priv)
 		ring->hangcheck.deadlock = 0;
 }
 
-static enum intel_ring_hangcheck_action
-ring_stuck(struct intel_engine_cs *ring, u64 acthd)
+static bool subunits_stuck(struct intel_engine_cs *ring)
 {
-	struct drm_device *dev = ring->dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
-	u32 tmp;
+	u32 instdone[I915_NUM_INSTDONE_REG];
+	bool stuck;
+	int i;
 
+	if (ring->id != RCS)
+		return true;
+
+	i915_get_extra_instdone(ring->dev, instdone);
+
+	/* There might be unstable subunit states even when
+	 * actual head is not moving. Filter out the unstable ones by
+	 * accumulating the undone -> done transitions and only
+	 * consider those as progress.
+	 */
+	stuck = true;
+	for (i = 0; i < I915_NUM_INSTDONE_REG; i++) {
+		const u32 tmp = instdone[i] | ring->hangcheck.instdone[i];
+
+		if (tmp != ring->hangcheck.instdone[i])
+			stuck = false;
+
+		ring->hangcheck.instdone[i] |= tmp;
+	}
+
+	return stuck;
+}
+
+static enum intel_ring_hangcheck_action
+head_stuck(struct intel_engine_cs *ring, u64 acthd)
+{
 	if (acthd != ring->hangcheck.acthd) {
+
+		/* Clear subunit states on head movement */
+		memset(ring->hangcheck.instdone, 0,
+		       sizeof(ring->hangcheck.instdone));
+
 		if (acthd > ring->hangcheck.max_acthd) {
 			ring->hangcheck.max_acthd = acthd;
 			return HANGCHECK_ACTIVE;
@@ -2960,6 +2990,24 @@ ring_stuck(struct intel_engine_cs *ring, u64 acthd)
 
 		return HANGCHECK_ACTIVE_LOOP;
 	}
+
+	if (!subunits_stuck(ring))
+		return HANGCHECK_ACTIVE;
+
+	return HANGCHECK_HUNG;
+}
+
+static enum intel_ring_hangcheck_action
+ring_stuck(struct intel_engine_cs *ring, u64 acthd)
+{
+	struct drm_device *dev = ring->dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	enum intel_ring_hangcheck_action ha;
+	u32 tmp;
+
+	ha = head_stuck(ring, acthd);
+	if (ha != HANGCHECK_HUNG)
+		return ha;
 
 	if (IS_GEN2(dev))
 		return HANGCHECK_HUNG;
@@ -3027,6 +3075,12 @@ static void i915_hangcheck_elapsed(struct work_struct *work)
 	 * sure that we hold a reference when this work is running.
 	 */
 	DISABLE_RPM_WAKEREF_ASSERTS(dev_priv);
+
+	/* As enabling the GPU requires fairly extensive mmio access,
+	 * periodically arm the mmio checker to see if we are triggering
+	 * any invalid access.
+	 */
+	intel_uncore_arm_unclaimed_mmio_detection(dev_priv);
 
 	for_each_ring(ring, dev_priv, i) {
 		u64 acthd;
@@ -3102,7 +3156,11 @@ static void i915_hangcheck_elapsed(struct work_struct *work)
 			if (ring->hangcheck.score > 0)
 				ring->hangcheck.score--;
 
+			/* Clear head and subunit states on seqno movement */
 			ring->hangcheck.acthd = ring->hangcheck.max_acthd = 0;
+
+			memset(ring->hangcheck.instdone, 0,
+			       sizeof(ring->hangcheck.instdone));
 		}
 
 		ring->hangcheck.seqno = seqno;

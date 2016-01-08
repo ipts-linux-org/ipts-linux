@@ -496,6 +496,19 @@ static bool execlists_check_remove_request(struct intel_engine_cs *ring,
 	return false;
 }
 
+static void get_context_status(struct intel_engine_cs *ring,
+			       u8 read_pointer,
+			       u32 *status, u32 *context_id)
+{
+	struct drm_i915_private *dev_priv = ring->dev->dev_private;
+
+	if (WARN_ON(read_pointer >= GEN8_CSB_ENTRIES))
+		return;
+
+	*status = I915_READ(RING_CONTEXT_STATUS_BUF_LO(ring, read_pointer));
+	*context_id = I915_READ(RING_CONTEXT_STATUS_BUF_HI(ring, read_pointer));
+}
+
 /**
  * intel_lrc_irq_handler() - handle Context Switch interrupts
  * @ring: Engine Command Streamer to handle.
@@ -516,16 +529,16 @@ void intel_lrc_irq_handler(struct intel_engine_cs *ring)
 	status_pointer = I915_READ(RING_CONTEXT_STATUS_PTR(ring));
 
 	read_pointer = ring->next_context_status_buffer;
-	write_pointer = status_pointer & GEN8_CSB_PTR_MASK;
+	write_pointer = GEN8_CSB_WRITE_PTR(status_pointer);
 	if (read_pointer > write_pointer)
 		write_pointer += GEN8_CSB_ENTRIES;
 
 	spin_lock(&ring->execlist_lock);
 
 	while (read_pointer < write_pointer) {
-		read_pointer++;
-		status = I915_READ(RING_CONTEXT_STATUS_BUF_LO(ring, read_pointer % GEN8_CSB_ENTRIES));
-		status_id = I915_READ(RING_CONTEXT_STATUS_BUF_HI(ring, read_pointer % GEN8_CSB_ENTRIES));
+
+		get_context_status(ring, ++read_pointer % GEN8_CSB_ENTRIES,
+				   &status, &status_id);
 
 		if (status & GEN8_CTX_STATUS_IDLE_ACTIVE)
 			continue;
@@ -538,8 +551,8 @@ void intel_lrc_irq_handler(struct intel_engine_cs *ring)
 				WARN(1, "Preemption without Lite Restore\n");
 		}
 
-		 if ((status & GEN8_CTX_STATUS_ACTIVE_IDLE) ||
-		     (status & GEN8_CTX_STATUS_ELEMENT_SWITCH)) {
+		if ((status & GEN8_CTX_STATUS_ACTIVE_IDLE) ||
+		    (status & GEN8_CTX_STATUS_ELEMENT_SWITCH)) {
 			if (execlists_check_remove_request(ring, status_id))
 				submit_contexts++;
 		}
@@ -556,13 +569,16 @@ void intel_lrc_irq_handler(struct intel_engine_cs *ring)
 
 	spin_unlock(&ring->execlist_lock);
 
-	WARN(submit_contexts > 2, "More than two context complete events?\n");
+	if (unlikely(submit_contexts > 2))
+		DRM_ERROR("More than two context complete events?\n");
+
 	ring->next_context_status_buffer = write_pointer % GEN8_CSB_ENTRIES;
 
+	/* Update the read pointer to the old write pointer. Manual ringbuffer
+	 * management ftw </sarcasm> */
 	I915_WRITE(RING_CONTEXT_STATUS_PTR(ring),
-		   _MASKED_FIELD(GEN8_CSB_PTR_MASK << 8,
-				 ((u32)ring->next_context_status_buffer &
-				  GEN8_CSB_PTR_MASK) << 8));
+		   _MASKED_FIELD(GEN8_CSB_READ_PTR_MASK,
+				 ring->next_context_status_buffer << 8));
 }
 
 static int execlists_context_queue(struct drm_i915_gem_request *request)
@@ -666,6 +682,19 @@ int intel_logical_ring_alloc_request_extras(struct drm_i915_gem_request *request
 
 	if (request->ctx != request->ring->default_context) {
 		ret = intel_lr_context_pin(request);
+		if (ret)
+			return ret;
+	}
+
+	if (i915.enable_guc_submission) {
+		/*
+		 * Check that the GuC has space for the request before
+		 * going any further, as the i915_add_request() call
+		 * later on mustn't fail ...
+		 */
+		struct intel_guc *guc = &request->i915->guc;
+
+		ret = i915_guc_wq_check_space(guc->execbuf_client);
 		if (ret)
 			return ret;
 	}
@@ -1087,7 +1116,7 @@ static int intel_logical_ring_workarounds_emit(struct drm_i915_gem_request *req)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct i915_workarounds *w = &dev_priv->workarounds;
 
-	if (WARN_ON_ONCE(w->count == 0))
+	if (w->count == 0)
 		return 0;
 
 	ring->gpu_caches_dirty = true;
@@ -1493,9 +1522,11 @@ static int gen8_init_common_ring(struct intel_engine_cs *ring)
 	 *      | Suspend-to-idle (freeze) | Suspend-to-RAM (mem) |
 	 * BDW  | CSB regs not reset       | CSB regs reset       |
 	 * CHT  | CSB regs not reset       | CSB regs not reset   |
+	 * SKL  |         ?                |         ?            |
+	 * BXT  |         ?                |         ?            |
 	 */
-	next_context_status_buffer_hw = (I915_READ(RING_CONTEXT_STATUS_PTR(ring))
-						   & GEN8_CSB_PTR_MASK);
+	next_context_status_buffer_hw =
+		GEN8_CSB_WRITE_PTR(I915_READ(RING_CONTEXT_STATUS_PTR(ring)));
 
 	/*
 	 * When the CSB registers are reset (also after power-up / gpu reset),
@@ -1698,7 +1729,7 @@ static int gen8_emit_flush_render(struct drm_i915_gem_request *request,
 	struct intel_ringbuffer *ringbuf = request->ringbuf;
 	struct intel_engine_cs *ring = ringbuf->ring;
 	u32 scratch_addr = ring->scratch.gtt_offset + 2 * CACHELINE_BYTES;
-	bool vf_flush_wa;
+	bool vf_flush_wa = false;
 	u32 flags = 0;
 	int ret;
 
@@ -1719,14 +1750,14 @@ static int gen8_emit_flush_render(struct drm_i915_gem_request *request,
 		flags |= PIPE_CONTROL_STATE_CACHE_INVALIDATE;
 		flags |= PIPE_CONTROL_QW_WRITE;
 		flags |= PIPE_CONTROL_GLOBAL_GTT_IVB;
-	}
 
-	/*
-	 * On GEN9+ Before VF_CACHE_INVALIDATE we need to emit a NULL pipe
-	 * control.
-	 */
-	vf_flush_wa = INTEL_INFO(ring->dev)->gen >= 9 &&
-		      flags & PIPE_CONTROL_VF_CACHE_INVALIDATE;
+		/*
+		 * On GEN9: before VF_CACHE_INVALIDATE we need to emit a NULL
+		 * pipe control.
+		 */
+		if (IS_GEN9(ring->dev))
+			vf_flush_wa = true;
+	}
 
 	ret = intel_logical_ring_begin(request, vf_flush_wa ? 12 : 6);
 	if (ret)
@@ -2386,7 +2417,21 @@ void intel_lr_context_free(struct intel_context *ctx)
 	}
 }
 
-static uint32_t get_lr_context_size(struct intel_engine_cs *ring)
+/**
+ * intel_lr_context_size() - return the size of the context for an engine
+ * @ring: which engine to find the context size for
+ *
+ * Each engine may require a different amount of space for a context image,
+ * so when allocating (or copying) an image, this function can be used to
+ * find the right size for the specific engine.
+ *
+ * Return: size (in bytes) of an engine-specific context image
+ *
+ * Note: this size includes the HWSP, which is part of the context image
+ * in LRC mode, but does not include the "shared data page" used with
+ * GuC submission. The caller should account for this if using the GuC.
+ */
+uint32_t intel_lr_context_size(struct intel_engine_cs *ring)
 {
 	int ret = 0;
 
@@ -2454,7 +2499,7 @@ int intel_lr_context_deferred_alloc(struct intel_context *ctx,
 	WARN_ON(ctx->legacy_hw_ctx.rcs_state != NULL);
 	WARN_ON(ctx->engine[ring->id].state);
 
-	context_size = round_up(get_lr_context_size(ring), 4096);
+	context_size = round_up(intel_lr_context_size(ring), 4096);
 
 	/* One extra page as the sharing data between driver and GuC */
 	context_size += PAGE_SIZE * LRC_PPHWSP_PN;

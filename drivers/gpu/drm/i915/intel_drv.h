@@ -246,9 +246,26 @@ struct intel_atomic_state {
 	struct drm_atomic_state base;
 
 	unsigned int cdclk;
-	bool dpll_set;
+
+	/*
+	 * Calculated device cdclk, can be different from cdclk
+	 * only when all crtc's are DPMS off.
+	 */
+	unsigned int dev_cdclk;
+
+	bool dpll_set, modeset;
+
+	unsigned int active_crtcs;
+	unsigned int min_pixclk[I915_MAX_PIPES];
+
 	struct intel_shared_dpll_config shared_dpll[I915_NUM_PLLS];
 	struct intel_wm_config wm_config;
+
+	/*
+	 * Current watermarks can't be trusted during hardware readout, so
+	 * don't bother calculating intermediate watermarks.
+	 */
+	bool skip_intermediate_wm;
 };
 
 struct intel_plane_state {
@@ -496,13 +513,29 @@ struct intel_crtc_state {
 
 	struct {
 		/*
-		 * optimal watermarks, programmed post-vblank when this state
-		 * is committed
+		 * Optimal watermarks, programmed post-vblank when this state
+		 * is committed.
 		 */
 		union {
 			struct intel_pipe_wm ilk;
 			struct skl_pipe_wm skl;
 		} optimal;
+
+		/*
+		 * Intermediate watermarks; these can be programmed immediately
+		 * since they satisfy both the current configuration we're
+		 * switching away from and the new configuration we're switching
+		 * to.
+		 */
+		struct intel_pipe_wm intermediate;
+
+		/*
+		 * Platforms with two-step watermark programming will need to
+		 * update watermark programming post-vblank to switch from the
+		 * safe intermediate watermarks to the optimal final
+		 * watermarks.
+		 */
+		bool need_postvbl_update;
 	} wm;
 };
 
@@ -589,6 +622,7 @@ struct intel_crtc {
 			struct intel_pipe_wm ilk;
 			struct skl_pipe_wm skl;
 		} active;
+
 		/* allow CxSR on this pipe */
 		bool cxsr_allowed;
 	} wm;
@@ -647,23 +681,17 @@ struct intel_plane {
 	/*
 	 * NOTE: Do not place new plane state fields here (e.g., when adding
 	 * new plane properties).  New runtime state should now be placed in
-	 * the intel_plane_state structure and accessed via drm_plane->state.
+	 * the intel_plane_state structure and accessed via plane_state.
 	 */
 
 	void (*update_plane)(struct drm_plane *plane,
-			     struct drm_crtc *crtc,
-			     struct drm_framebuffer *fb,
-			     int crtc_x, int crtc_y,
-			     unsigned int crtc_w, unsigned int crtc_h,
-			     uint32_t x, uint32_t y,
-			     uint32_t src_w, uint32_t src_h);
+			     const struct intel_crtc_state *crtc_state,
+			     const struct intel_plane_state *plane_state);
 	void (*disable_plane)(struct drm_plane *plane,
 			      struct drm_crtc *crtc);
 	int (*check_plane)(struct drm_plane *plane,
 			   struct intel_crtc_state *crtc_state,
 			   struct intel_plane_state *state);
-	void (*commit_plane)(struct drm_plane *plane,
-			     struct intel_plane_state *state);
 };
 
 struct intel_watermark_params {
@@ -1442,8 +1470,10 @@ static inline void
 assert_rpm_wakelock_held(struct drm_i915_private *dev_priv)
 {
 	assert_rpm_device_not_suspended(dev_priv);
-	WARN_ONCE(!atomic_read(&dev_priv->pm.wakeref_count),
-		  "RPM wakelock ref not held during HW access");
+	/* FIXME: Needs to be converted back to WARN_ONCE, but currently causes
+	 * too much noise. */
+	if (!atomic_read(&dev_priv->pm.wakeref_count))
+		DRM_DEBUG_DRIVER("RPM wakelock ref not held during HW access");
 }
 
 static inline int
@@ -1553,6 +1583,7 @@ void skl_wm_get_hw_state(struct drm_device *dev);
 void skl_ddb_get_hw_state(struct drm_i915_private *dev_priv,
 			  struct skl_ddb_allocation *ddb /* out */);
 uint32_t ilk_pipe_pixel_rate(const struct intel_crtc_state *pipe_config);
+bool ilk_disable_lp_wm(struct drm_device *dev);
 
 /* intel_sdvo.c */
 bool intel_sdvo_init(struct drm_device *dev,

@@ -232,11 +232,9 @@ static const u8 *mipi_exec_gpio(struct intel_dsi *intel_dsi, const u8 *data)
 typedef const u8 * (*fn_mipi_elem_exec)(struct intel_dsi *intel_dsi,
 					const u8 *data);
 static const fn_mipi_elem_exec exec_elem[] = {
-	NULL, /* reserved */
-	mipi_exec_send_packet,
-	mipi_exec_delay,
-	mipi_exec_gpio,
-	NULL, /* status read; later */
+	[MIPI_SEQ_ELEM_SEND_PKT] = mipi_exec_send_packet,
+	[MIPI_SEQ_ELEM_DELAY] = mipi_exec_delay,
+	[MIPI_SEQ_ELEM_GPIO] = mipi_exec_gpio,
 };
 
 /*
@@ -246,38 +244,44 @@ static const fn_mipi_elem_exec exec_elem[] = {
  */
 
 static const char * const seq_name[] = {
-	"UNDEFINED",
-	"MIPI_SEQ_ASSERT_RESET",
-	"MIPI_SEQ_INIT_OTP",
-	"MIPI_SEQ_DISPLAY_ON",
-	"MIPI_SEQ_DISPLAY_OFF",
-	"MIPI_SEQ_DEASSERT_RESET"
+	[MIPI_SEQ_ASSERT_RESET] = "MIPI_SEQ_ASSERT_RESET",
+	[MIPI_SEQ_INIT_OTP] = "MIPI_SEQ_INIT_OTP",
+	[MIPI_SEQ_DISPLAY_ON] = "MIPI_SEQ_DISPLAY_ON",
+	[MIPI_SEQ_DISPLAY_OFF]  = "MIPI_SEQ_DISPLAY_OFF",
+	[MIPI_SEQ_DEASSERT_RESET] = "MIPI_SEQ_DEASSERT_RESET",
 };
+
+static const char *sequence_name(enum mipi_seq seq_id)
+{
+	if (seq_id < ARRAY_SIZE(seq_name) && seq_name[seq_id])
+		return seq_name[seq_id];
+	else
+		return "(unknown)";
+}
 
 static void generic_exec_sequence(struct intel_dsi *intel_dsi, const u8 *data)
 {
 	fn_mipi_elem_exec mipi_elem_exec;
-	int index;
 
 	if (!data)
 		return;
 
-	DRM_DEBUG_DRIVER("Starting MIPI sequence - %s\n", seq_name[*data]);
+	DRM_DEBUG_DRIVER("Starting MIPI sequence %u - %s\n",
+			 *data, sequence_name(*data));
 
 	/* go to the first element of the sequence */
 	data++;
 
 	/* parse each byte till we reach end of sequence byte - 0x00 */
 	while (1) {
-		index = *data;
-		mipi_elem_exec = exec_elem[index];
-		if (!mipi_elem_exec) {
-			DRM_ERROR("Unsupported MIPI element, skipping sequence execution\n");
+		u8 operation_byte = *data++;
+		if (operation_byte >= ARRAY_SIZE(exec_elem) ||
+		    !exec_elem[operation_byte]) {
+			DRM_ERROR("Unsupported MIPI operation byte %u\n",
+				  operation_byte);
 			return;
 		}
-
-		/* goto element payload */
-		data++;
+		mipi_elem_exec = exec_elem[operation_byte];
 
 		/* execute the element specific rotines */
 		data = mipi_elem_exec(intel_dsi, data);
@@ -666,6 +670,8 @@ struct drm_panel *vbt_panel_init(struct intel_dsi *intel_dsi, u16 panel_id)
 
 	/* This is cheating a bit with the cleanup. */
 	vbt_panel = devm_kzalloc(dev->dev, sizeof(*vbt_panel), GFP_KERNEL);
+	if (!vbt_panel)
+		return NULL;
 
 	vbt_panel->intel_dsi = intel_dsi;
 	drm_panel_init(&vbt_panel->panel);
