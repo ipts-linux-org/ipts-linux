@@ -1,0 +1,8 @@
+config INTEL_MEI_ITOUCH
+	tristate "Intel Integrated Touch with ME Interface"
+	select INTEL_MEI
+	depends on X86 && PCI && WATCHDOG_CORE && HID
+	help
+	  MEI Support for Intel Integrated Touch device on Intel SoCs
+	  Supported SoCs:
+	  Intel Skylake

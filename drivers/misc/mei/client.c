@@ -1632,10 +1632,14 @@ int mei_cl_write(struct mei_cl *cl, struct mei_cl_cb *cb, bool blocking)
 
 	rets = mei_cl_flow_ctrl_creds(cl);
 	if (rets < 0)
+	{
+		pr_err("itouch Check rets below 0 rets:%d\n", rets);
 		goto err;
+	}
 
 	if (rets == 0) {
 		cl_dbg(dev, cl, "No flow control credentials: not sending.\n");
+		pr_err("itouch Check rets is 0 \n");
 		rets = size;
 		goto out;
 	}
