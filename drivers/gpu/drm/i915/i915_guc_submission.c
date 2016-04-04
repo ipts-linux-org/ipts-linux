@@ -383,7 +383,18 @@ static void guc_init_ctx_desc(struct intel_guc *guc,
 
 	memset(&desc, 0, sizeof(desc));
 
-	desc.attribute = GUC_CTX_DESC_ATTR_ACTIVE | GUC_CTX_DESC_ATTR_KERNEL;
+	desc.attribute = GUC_CTX_DESC_ATTR_ACTIVE;
+	if ((client->priority == GUC_CTX_PRIORITY_KMD_NORMAL) ||
+			(client->priority == GUC_CTX_PRIORITY_KMD_HIGH)) {
+
+		desc.attribute  |= GUC_CTX_DESC_ATTR_KERNEL;
+
+	} else {
+
+		desc.attribute  |= GUC_CTX_DESC_ATTR_PCH;
+
+	}
+
 	desc.context_id = client->ctx_index;
 	desc.priority = client->priority;
 	desc.db_id = client->doorbell_id;
@@ -416,12 +427,17 @@ static void guc_init_ctx_desc(struct intel_guc *guc,
 		lrc->context_id = (client->ctx_index << GUC_ELC_CTXID_OFFSET) |
 				(ring->id << GUC_ELC_ENGINE_OFFSET);
 
+		DRM_DEBUG_DRIVER("Ring LRC address to GUC = 0x%08x for ring id = %d\n",
+						(u32)lrc->ring_lcra, i);
+
 		obj = ringbuf->obj;
 
 		lrc->ring_begin = i915_gem_obj_ggtt_offset(obj);
 		lrc->ring_end = lrc->ring_begin + obj->base.size - 1;
 		lrc->ring_next_free_location = lrc->ring_begin;
 		lrc->ring_current_tail_pointer_value = 0;
+
+		DRM_DEBUG_DRIVER("Ring begin = 0x%08x", (u32)lrc->ring_begin);
 
 		desc.engines_used |= (1 << ring->id);
 	}
@@ -446,6 +462,11 @@ static void guc_init_ctx_desc(struct intel_guc *guc,
 		i915_gem_obj_ggtt_offset(client->client_obj);
 
 	desc.wq_size = client->wq_size;
+
+	DRM_DEBUG_DRIVER("GUC: proc_desc GTT addr = 0x%08x, WQ GTT addr = 0x%08x\n",
+					desc.process_desc, desc.wq_addr);
+	DRM_DEBUG_DRIVER("Doorbell: GGT addr = 0x%08x, Phy addr = 0x%llx\n",
+				desc.db_trigger_uk, desc.db_trigger_phy);
 
 	/*
 	 * XXX: Take LRCs from an existing intel_context if this is not an
@@ -782,6 +803,7 @@ static struct i915_guc_client *guc_client_alloc(struct drm_device *dev,
 	guc_init_doorbell(guc, client);
 
 	/* XXX: Any cache flushes needed? General domain mgmt calls? */
+	I915_WRITE(GEN8_GTCR, GEN8_GTCR_INVALIDATE);
 
 	if (host2guc_allocate_doorbell(guc, client))
 		goto err;
@@ -1005,6 +1027,44 @@ void i915_guc_submission_fini(struct drm_device *dev)
 		ida_destroy(&guc->ctx_ids);
 	gem_release_guc_obj(guc->ctx_pool_obj);
 	guc->ctx_pool_obj = NULL;
+}
+
+int i915_guc_itouch_submission_enable(struct drm_device *dev,
+				struct intel_context *ctx)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_guc *guc = &dev_priv->guc;
+	struct i915_guc_client *client;
+
+	/* client for itouch submission */
+	client = guc_client_alloc(dev, GUC_CTX_PRIORITY_HIGH, ctx);
+	if (!client) {
+		DRM_ERROR("Failed to create iTouch guc_client\n");
+		return -ENOMEM;
+	}
+
+	guc->itouch_client = client;
+
+	return 0;
+}
+
+void i915_guc_itouch_submission_disable(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_guc *guc = &dev_priv->guc;
+
+	guc_client_free(dev, guc->itouch_client);
+	guc->itouch_client = NULL;
+}
+
+void i915_guc_itouch_reacquire_doorbell(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_guc *guc = &dev_priv->guc;
+
+	if (host2guc_allocate_doorbell(guc, guc->itouch_client)) {
+		DRM_ERROR("Not able to reacquire itouch doorbell\n");
+	}
 }
 
 /**

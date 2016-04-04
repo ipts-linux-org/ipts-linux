@@ -36,6 +36,7 @@
 #include "i915_drv.h"
 #include "i915_trace.h"
 #include "intel_drv.h"
+#include "intel_touch.h"
 
 /**
  * DOC: interrupt handling
@@ -1325,6 +1326,8 @@ gen8_cs_irq_handler(struct intel_engine_cs *ring, u32 iir, int test_shift)
 		notify_ring(ring);
 	if (iir & (GT_CONTEXT_SWITCH_INTERRUPT << test_shift))
 		intel_lrc_irq_handler(ring);
+	if (iir & (GT_RENDER_PIPECTL_NOTIFY_INTERRUPT << test_shift))
+		i915_itouch_notify();
 }
 
 static irqreturn_t gen8_gt_irq_handler(struct drm_i915_private *dev_priv,
@@ -3726,6 +3729,7 @@ static void gen8_gt_irq_postinstall(struct drm_i915_private *dev_priv)
 {
 	/* These are interrupts we'll toggle with the ring mask register */
 	uint32_t gt_interrupts[] = {
+		GT_RENDER_PIPECTL_NOTIFY_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
 		GT_RENDER_USER_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
 			GT_CONTEXT_SWITCH_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
 			GT_RENDER_L3_PARITY_ERROR_INTERRUPT |

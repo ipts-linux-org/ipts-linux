@@ -2002,7 +2002,8 @@ static int logical_render_ring_init(struct drm_device *dev)
 	ring->irq_enable_mask =
 		GT_RENDER_USER_INTERRUPT << GEN8_RCS_IRQ_SHIFT;
 	ring->irq_keep_mask =
-		GT_CONTEXT_SWITCH_INTERRUPT << GEN8_RCS_IRQ_SHIFT;
+		(GT_RENDER_PIPECTL_NOTIFY_INTERRUPT |
+			GT_CONTEXT_SWITCH_INTERRUPT) << GEN8_RCS_IRQ_SHIFT;
 	if (HAS_L3_DPF(dev))
 		ring->irq_keep_mask |= GT_RENDER_L3_PARITY_ERROR_INTERRUPT;
 

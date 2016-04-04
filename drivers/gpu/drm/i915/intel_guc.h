@@ -95,6 +95,7 @@ struct intel_guc {
 	struct ida ctx_ids;
 
 	struct i915_guc_client *execbuf_client;
+	struct i915_guc_client *itouch_client;
 
 	DECLARE_BITMAP(doorbell_bitmap, GUC_MAX_DOORBELLS);
 	uint32_t db_cacheline;		/* Cyclic counter mod pagesize	*/
@@ -125,6 +126,12 @@ int i915_guc_submit(struct i915_guc_client *client,
 		    struct drm_i915_gem_request *rq);
 void i915_guc_submission_disable(struct drm_device *dev);
 void i915_guc_submission_fini(struct drm_device *dev);
+int i915_guc_itouch_submission_enable(struct drm_device *dev,
+                               struct intel_context *ctx);
+void i915_guc_itouch_submission_disable(struct drm_device *dev);
+
 int i915_guc_wq_check_space(struct i915_guc_client *client);
+
+void i915_guc_itouch_reacquire_doorbell(struct drm_device *dev);
 
 #endif

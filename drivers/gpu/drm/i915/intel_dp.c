@@ -38,6 +38,7 @@
 #include "intel_drv.h"
 #include <drm/i915_drm.h>
 #include "i915_drv.h"
+#include "intel_touch.h"
 
 #define DP_LINK_CHECK_TIMEOUT	(10 * 1000)
 
@@ -1900,6 +1901,8 @@ static bool edp_panel_vdd_on(struct intel_dp *intel_dp)
 	POSTING_READ(pp_ctrl_reg);
 	DRM_DEBUG_KMS("PP_STATUS: 0x%08x PP_CONTROL: 0x%08x\n",
 			I915_READ(pp_stat_reg), I915_READ(pp_ctrl_reg));
+
+	i915_itouch_notify_display_status(true);
 	/*
 	 * If the panel wasn't on, delay before accessing aux channel
 	 */
@@ -2120,6 +2123,8 @@ static void edp_panel_off(struct intel_dp *intel_dp)
 
 	intel_dp->last_power_cycle = jiffies;
 	wait_panel_off(intel_dp);
+
+	i915_itouch_notify_display_status(false);
 
 	/* We got a reference when we enabled the VDD. */
 	power_domain = intel_display_port_aux_power_domain(intel_encoder);

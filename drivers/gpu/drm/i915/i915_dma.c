@@ -37,6 +37,7 @@
 #include "i915_drv.h"
 #include "i915_vgpu.h"
 #include "i915_trace.h"
+#include "intel_touch.h"
 #include <linux/pci.h>
 #include <linux/console.h>
 #include <linux/vt.h>
@@ -1088,6 +1089,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	i915_audio_component_init(dev_priv);
 
+	if (i915.enable_guc_submission)
+		i915_itouch_init(dev);
+
 	intel_runtime_pm_put(dev_priv);
 
 	return 0;
@@ -1138,7 +1142,7 @@ int i915_driver_unload(struct drm_device *dev)
 	int ret;
 
 	intel_fbdev_fini(dev);
-
+	i915_itouch_cleanup(dev);
 	i915_audio_component_cleanup(dev_priv);
 
 	ret = i915_gem_suspend(dev);

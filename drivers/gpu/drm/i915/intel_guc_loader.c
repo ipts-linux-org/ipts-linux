@@ -108,7 +108,8 @@ static void direct_interrupts_to_guc(struct drm_i915_private *dev_priv)
 		I915_WRITE(RING_MODE_GEN7(ring), irqs);
 
 	/* route USER_INTERRUPT to Host, all others are sent to GuC. */
-	irqs = GT_RENDER_USER_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
+	irqs = ((GT_RENDER_USER_INTERRUPT | GT_RENDER_PIPECTL_NOTIFY_INTERRUPT)
+				<< GEN8_RCS_IRQ_SHIFT) |
 	       GT_RENDER_USER_INTERRUPT << GEN8_BCS_IRQ_SHIFT;
 	/* These three registers have the same bit definitions */
 	I915_WRITE(GUC_BCS_RCS_IER, ~irqs);
@@ -182,6 +183,9 @@ static void set_guc_init_params(struct drm_i915_private *dev_priv)
 			(ctx_in_16 << GUC_CTL_CTXNUM_IN16_SHIFT);
 
 		params[GUC_CTL_FEATURE] |= GUC_CTL_KERNEL_SUBMISSIONS;
+
+		params[GUC_CTL_FEATURE] |= GUC_CTL_RESET_ON_PREMPT_FAILURE;
+		params[GUC_CTL_FEATURE] |= GUC_CTL_PREEMPTION_LOG;
 
 		/* Unmask this bit to enable the GuC's internal scheduler */
 		params[GUC_CTL_FEATURE] &= ~GUC_CTL_DISABLE_SCHEDULER;

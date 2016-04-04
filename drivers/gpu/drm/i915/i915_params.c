@@ -55,8 +55,8 @@ struct i915_params i915 __read_mostly = {
 	.verbose_state_checks = 1,
 	.nuclear_pageflip = 0,
 	.edp_vswing = 0,
-	.enable_guc_submission = false,
-	.guc_log_level = -1,
+	.enable_guc_submission = true,
+	.guc_log_level = 3,
 };
 
 module_param_named(modeset, i915.modeset, int, 0400);
@@ -198,8 +198,8 @@ MODULE_PARM_DESC(edp_vswing,
 		 "2=default swing(400mV))");
 
 module_param_named_unsafe(enable_guc_submission, i915.enable_guc_submission, bool, 0400);
-MODULE_PARM_DESC(enable_guc_submission, "Enable GuC submission (default:false)");
+MODULE_PARM_DESC(enable_guc_submission, "Enable GuC submission (default:true)");
 
 module_param_named(guc_log_level, i915.guc_log_level, int, 0400);
 MODULE_PARM_DESC(guc_log_level,
-	"GuC firmware logging level (-1:disabled (default), 0-3:enabled)");
+	"GuC firmware logging level (3:enabled (default), 0-3:enabled)");
