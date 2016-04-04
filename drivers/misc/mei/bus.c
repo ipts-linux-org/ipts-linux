@@ -219,11 +219,13 @@ static void mei_cl_bus_event_work(struct work_struct *work)
 	if (cldev->event_cb)
 		cldev->event_cb(cldev, cldev->events, cldev->event_context);
 
-	cldev->events = 0;
+#if 0
+	//cldev->events = 0;
 
 	/* Prepare for the next read */
 	if (cldev->events_mask & BIT(MEI_CL_EVENT_RX))
 		mei_cl_read_start(cldev->cl, 0, NULL);
+#endif
 }
 
 /**
@@ -269,6 +271,9 @@ void mei_cl_bus_rx_event(struct mei_cl *cl)
 	set_bit(MEI_CL_EVENT_RX, &cldev->events);
 
 	schedule_work(&cldev->event_work);
+
+	if (cldev->events_mask & BIT(MEI_CL_EVENT_RX))
+                mei_cl_read_start(cldev->cl, 0, NULL);
 }
 
 /**
